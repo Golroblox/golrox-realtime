@@ -179,6 +179,11 @@ func (c *RabbitMQConsumer) processMessages(ctx context.Context, msgs <-chan amqp
 func (c *RabbitMQConsumer) handleMessage(msg amqp.Delivery) {
 	startTime := time.Now()
 
+	fmt.Printf("\n========== RABBITMQ MESSAGE RECEIVED ==========\n")
+	fmt.Printf("RoutingKey: %s\n", msg.RoutingKey)
+	fmt.Printf("Body: %s\n", string(msg.Body))
+	fmt.Printf("================================================\n\n")
+
 	var event domain.RabbitMQEvent
 	if err := json.Unmarshal(msg.Body, &event); err != nil {
 		c.logger.Errorw("Failed to unmarshal message",
@@ -190,6 +195,9 @@ func (c *RabbitMQConsumer) handleMessage(msg amqp.Delivery) {
 		msg.Nack(false, false)
 		return
 	}
+
+	fmt.Printf("Event Type: %s\n", event.Type)
+	fmt.Printf("Payload: %s\n", string(event.Payload))
 
 	c.logger.Debugw("Received message",
 		"type", event.Type,

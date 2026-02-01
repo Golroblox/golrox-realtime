@@ -88,8 +88,13 @@ func (h *Hub) closeAllClients() {
 	h.logger.Infow("All clients disconnected", "count", len(h.clients))
 }
 
-// Register adds a new client to the hub
+// Register adds a new client to the hub (synchronous)
 func (h *Hub) Register(client *domain.Client) {
+	h.registerClient(client)
+}
+
+// RegisterAsync adds a new client to the hub via channel (async)
+func (h *Hub) RegisterAsync(client *domain.Client) {
 	h.register <- client
 }
 
@@ -116,8 +121,11 @@ func (h *Hub) unregisterClient(client *domain.Client) {
 	defer h.mu.Unlock()
 
 	if _, ok := h.clients[client.ID]; ok {
-		// Remove from all rooms
-		for room := range client.Rooms {
+		// Get rooms safely using client's thread-safe method
+		rooms := client.GetRooms()
+
+		// Remove client from all rooms
+		for _, room := range rooms {
 			if clients, ok := h.rooms[room]; ok {
 				delete(clients, client.ID)
 				if len(clients) == 0 {
@@ -177,9 +185,10 @@ func (h *Hub) LeaveRoom(client *domain.Client, room string) {
 func (h *Hub) BroadcastToRoom(room string, message *domain.ServerMessage) error {
 	h.mu.RLock()
 	clients, ok := h.rooms[room]
+
 	if !ok || len(clients) == 0 {
 		h.mu.RUnlock()
-		return nil // No clients in room, silently return
+		return nil // No clients in room
 	}
 
 	// Copy clients to avoid holding lock during send
@@ -194,19 +203,34 @@ func (h *Hub) BroadcastToRoom(room string, message *domain.ServerMessage) error 
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
+	// Send to each client with panic protection
 	for _, client := range clientsCopy {
-		select {
-		case client.Send <- data:
-		default:
-			// Client buffer full, skip
-			h.logger.Warnw("Client send buffer full",
+		h.safeSend(client, data, room)
+	}
+
+	return nil
+}
+
+// safeSend sends data to client with panic recovery for closed channels
+func (h *Hub) safeSend(client *domain.Client, data []byte, room string) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Warnw("Recovered from send panic (channel closed)",
 				"clientId", client.ID,
 				"room", room,
 			)
 		}
-	}
+	}()
 
-	return nil
+	select {
+	case client.Send <- data:
+		// Message sent successfully
+	default:
+		h.logger.Warnw("Client send buffer full",
+			"clientId", client.ID,
+			"room", room,
+		)
+	}
 }
 
 // SendToClient sends a message to a specific client
@@ -223,6 +247,20 @@ func (h *Hub) SendToClient(clientID string, message *domain.ServerMessage) error
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
+
+	return h.safeSendToClient(client, data, clientID)
+}
+
+// safeSendToClient sends data to a specific client with panic recovery
+func (h *Hub) safeSendToClient(client *domain.Client, data []byte, clientID string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("channel closed for client: %s", clientID)
+			h.logger.Warnw("Recovered from send panic (channel closed)",
+				"clientId", clientID,
+			)
+		}
+	}()
 
 	select {
 	case client.Send <- data:

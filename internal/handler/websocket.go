@@ -178,11 +178,22 @@ func (h *WebSocketHandler) writePump(client *domain.Client) {
 			}
 			w.Write(message)
 
-			// Drain queued messages to reduce syscalls
-			n := len(client.Send)
-			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
-				w.Write(<-client.Send)
+			// Drain queued messages safely using select
+			draining := true
+			for draining {
+				select {
+				case msg, ok := <-client.Send:
+					if !ok {
+						// Channel closed, stop draining
+						draining = false
+					} else {
+						w.Write([]byte{'\n'})
+						w.Write(msg)
+					}
+				default:
+					// No more messages, stop draining
+					draining = false
+				}
 			}
 
 			if err := w.Close(); err != nil {

@@ -46,7 +46,7 @@ func NewClient(id string, conn *websocket.Conn, userID, email *string, anonymous
 		Email:     email,
 		Anonymous: anonymous,
 		Rooms:     make(map[string]bool),
-		Send:      make(chan []byte, 256),
+		Send:      make(chan []byte, 1024),
 		CreatedAt: time.Now(),
 	}
 }

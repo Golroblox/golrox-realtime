@@ -57,7 +57,6 @@ func (d *EventDispatcher) handlePaymentSuccess(rawPayload json.RawMessage, times
 		return fmt.Errorf("failed to unmarshal payment.success payload: %w", err)
 	}
 
-	// Build client payload (remove buyerId for privacy)
 	clientPayload := domain.PaymentSuccessClientPayload{
 		OrderID:       payload.OrderID,
 		Amount:        payload.Amount,
