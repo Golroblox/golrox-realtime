@@ -1,0 +1,49 @@
+options:
+  logging: "CLOUD_LOGGING_ONLY"
+  machineType: "E2_HIGHCPU_32"
+
+substitutions:
+  _REGION: "asia-southeast1"
+  _SERVICE_NAME: "golrox-realtime"
+  _REPOSITORY: "golrox"
+
+steps:
+  # Build container image using Kaniko for faster builds
+  - name: "gcr.io/kaniko-project/executor:latest"
+    args:
+      - "--destination=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}:${SHORT_SHA}"
+      - "--destination=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}:latest"
+      - "--cache=true"
+      - "--cache-ttl=168h"
+      - "--snapshotMode=redo"
+      - "--compressed-caching=false"
+    id: "build"
+
+  # Deploy to Cloud Run
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - "run"
+      - "deploy"
+      - "${_SERVICE_NAME}"
+      - "--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}:${SHORT_SHA}"
+      - "--region=${_REGION}"
+      - "--platform=managed"
+      - "--allow-unauthenticated"
+      - "--min-instances=1"
+      - "--max-instances=3"
+      - "--memory=512Mi"
+      - "--cpu=1"
+      - "--concurrency=100"
+      - "--port=3002"
+      - "--set-secrets=/secrets/.env=${_SERVICE_NAME}-env:latest"
+      - "--session-affinity"
+    id: "deploy"
+    waitFor:
+      - "build"
+
+timeout: "1200s"
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}:${SHORT_SHA}"
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}:latest"
