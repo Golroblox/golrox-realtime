@@ -1,0 +1,27 @@
+# docker-compose.yml for STAGING environment
+# This file is protected by .gitattributes (merge=ours)
+version: '3.8'
+
+services:
+  golrox-realtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: golrox-realtime-staging
+    ports:
+      - "3002:3002"
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - golrox-network
+
+networks:
+  golrox-network:
+    driver: bridge
