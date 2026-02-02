@@ -1,0 +1,5 @@
+# Prevent merge conflicts for environment-specific files
+# Each branch keeps its own version during merges
+cloudbuild.yaml merge=ours
+Dockerfile merge=ours
+docker-compose.yml merge=ours
