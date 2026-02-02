@@ -14,15 +14,28 @@ type Config struct {
 	LogLevel string `env:"LOG_LEVEL" envDefault:"debug"`
 
 	// RabbitMQ
-	RabbitMQURL      string `env:"RABBITMQ_URL,required"`
-	RabbitMQExchange string `env:"RABBITMQ_EXCHANGE" envDefault:"golrox.events"`
-	RabbitMQQueue    string `env:"RABBITMQ_QUEUE" envDefault:"golrox.realtime"`
+	RabbitMQURL   string `env:"RABBITMQ_URL,required"`
+	RabbitMQQueue string `env:"RABBITMQ_QUEUE" envDefault:"golrox.realtime"`
+
+	// RabbitMQ Exchanges (separated by feature)
+	RabbitMQExchangeOrders        string `env:"RABBITMQ_EXCHANGE_ORDERS" envDefault:"golrox.events.orders"`
+	RabbitMQExchangePayments      string `env:"RABBITMQ_EXCHANGE_PAYMENTS" envDefault:"golrox.events.payments"`
+	RabbitMQExchangeNotifications string `env:"RABBITMQ_EXCHANGE_NOTIFICATIONS" envDefault:"golrox.events.notifications"`
 
 	// JWT (optional - if empty, only anonymous connections allowed)
 	JWTSecret string `env:"JWT_SECRET"`
 
 	// CORS
 	CORSOrigins []string `env:"CORS_ORIGINS" envSeparator:"," envDefault:"http://localhost:3000"`
+}
+
+// GetExchanges returns all configured exchanges with their routing keys
+func (c *Config) GetExchanges() map[string][]string {
+	return map[string][]string{
+		c.RabbitMQExchangeOrders:        {"order.*"},
+		c.RabbitMQExchangePayments:      {"payment.*"},
+		c.RabbitMQExchangeNotifications: {"notification.*"},
+	}
 }
 
 // Load parses environment variables into Config struct

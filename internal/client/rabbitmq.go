@@ -67,19 +67,25 @@ func (c *RabbitMQConsumer) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to open channel: %w", err)
 	}
 
-	// Declare exchange
-	err = c.channel.ExchangeDeclare(
-		c.cfg.RabbitMQExchange, // name
-		"topic",               // type
-		true,                  // durable
-		false,                 // auto-deleted
-		false,                 // internal
-		false,                 // no-wait
-		nil,                   // arguments
-	)
-	if err != nil {
-		c.cleanup()
-		return fmt.Errorf("failed to declare exchange: %w", err)
+	// Get all exchanges with their routing keys
+	exchanges := c.cfg.GetExchanges()
+
+	// Declare all exchanges
+	for exchangeName := range exchanges {
+		err = c.channel.ExchangeDeclare(
+			exchangeName, // name
+			"topic",      // type
+			true,         // durable
+			false,        // auto-deleted
+			false,        // internal
+			false,        // no-wait
+			nil,          // arguments
+		)
+		if err != nil {
+			c.cleanup()
+			return fmt.Errorf("failed to declare exchange %s: %w", exchangeName, err)
+		}
+		c.logger.Debugw("Exchange declared", "exchange", exchangeName)
 	}
 
 	// Declare queue
@@ -96,24 +102,28 @@ func (c *RabbitMQConsumer) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to declare queue: %w", err)
 	}
 
-	// Bind queue to routing keys
-	routingKeys := []string{"payment.*", "order.*", "notification.*"}
-	for _, routingKey := range routingKeys {
-		err = c.channel.QueueBind(
-			queue.Name,            // queue name
-			routingKey,            // routing key
-			c.cfg.RabbitMQExchange, // exchange
-			false,                 // no-wait
-			nil,                   // arguments
-		)
-		if err != nil {
-			c.cleanup()
-			return fmt.Errorf("failed to bind queue to %s: %w", routingKey, err)
+	// Bind queue to each exchange with appropriate routing keys
+	var allRoutingKeys []string
+	for exchangeName, routingKeys := range exchanges {
+		for _, routingKey := range routingKeys {
+			err = c.channel.QueueBind(
+				queue.Name,   // queue name
+				routingKey,   // routing key
+				exchangeName, // exchange
+				false,        // no-wait
+				nil,          // arguments
+			)
+			if err != nil {
+				c.cleanup()
+				return fmt.Errorf("failed to bind queue to %s on %s: %w", routingKey, exchangeName, err)
+			}
+			c.logger.Debugw("Bound queue to routing key",
+				"queue", queue.Name,
+				"exchange", exchangeName,
+				"routingKey", routingKey,
+			)
+			allRoutingKeys = append(allRoutingKeys, fmt.Sprintf("%s:%s", exchangeName, routingKey))
 		}
-		c.logger.Debugw("Bound queue to routing key",
-			"queue", queue.Name,
-			"routingKey", routingKey,
-		)
 	}
 
 	// Set prefetch (QoS)
@@ -141,10 +151,16 @@ func (c *RabbitMQConsumer) Connect(ctx context.Context) error {
 	c.isConnected = true
 	c.reconnectAttempts = 0
 
+	// Get exchange names for logging
+	var exchangeNames []string
+	for name := range exchanges {
+		exchangeNames = append(exchangeNames, name)
+	}
+
 	c.logger.Infow("RabbitMQ consumer started",
-		"exchange", c.cfg.RabbitMQExchange,
+		"exchanges", exchangeNames,
 		"queue", queue.Name,
-		"routingKeys", routingKeys,
+		"bindings", allRoutingKeys,
 		"prefetch", prefetchCount,
 	)
 

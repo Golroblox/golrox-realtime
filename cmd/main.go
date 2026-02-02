@@ -40,8 +40,8 @@ func main() {
 	appLogger.Infow("Starting golrox-realtime service...",
 		"appEnv", cfg.AppEnv,
 		"port", cfg.Port,
-		"rabbitmqExchange", cfg.RabbitMQExchange,
 		"rabbitmqQueue", cfg.RabbitMQQueue,
+		"exchanges", cfg.GetExchanges(),
 	)
 
 	// Setup context for graceful shutdown

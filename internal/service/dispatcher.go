@@ -164,6 +164,7 @@ func (d *EventDispatcher) handleOrderProcessing(rawPayload json.RawMessage, time
 	d.logger.Infow("Dispatched order.processing",
 		"orderId", payload.OrderID,
 		"orderItemId", payload.OrderItemID,
+		"orderRoomSize", d.hub.GetRoomSize(orderRoom),
 		"correlationId", correlationID,
 	)
 
@@ -200,6 +201,7 @@ func (d *EventDispatcher) handleOrderDelivered(rawPayload json.RawMessage, times
 	d.logger.Infow("Dispatched order.delivered",
 		"orderId", payload.OrderID,
 		"orderItemId", payload.OrderItemID,
+		"orderRoomSize", d.hub.GetRoomSize(orderRoom),
 		"correlationId", correlationID,
 	)
 
@@ -238,6 +240,7 @@ func (d *EventDispatcher) handleOrderFailed(rawPayload json.RawMessage, timestam
 		"orderId", payload.OrderID,
 		"orderItemId", payload.OrderItemID,
 		"reason", payload.Reason,
+		"orderRoomSize", d.hub.GetRoomSize(orderRoom),
 		"correlationId", correlationID,
 	)
 

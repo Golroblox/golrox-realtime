@@ -73,21 +73,21 @@ type PaymentExpiredPayload struct {
 // OrderProcessingPayload represents order.processing event payload
 type OrderProcessingPayload struct {
 	OrderID     string `json:"orderId"`
-	OrderItemID int    `json:"orderItemId"`
+	OrderItemID string `json:"orderItemId"`
 	BuyerID     string `json:"buyerId"`
 }
 
 // OrderDeliveredPayload represents order.delivered event payload
 type OrderDeliveredPayload struct {
 	OrderID     string `json:"orderId"`
-	OrderItemID int    `json:"orderItemId"`
+	OrderItemID string `json:"orderItemId"`
 	BuyerID     string `json:"buyerId"`
 }
 
 // OrderFailedPayload represents order.failed event payload
 type OrderFailedPayload struct {
 	OrderID     string `json:"orderId"`
-	OrderItemID int    `json:"orderItemId"`
+	OrderItemID string `json:"orderItemId"`
 	BuyerID     string `json:"buyerId"`
 	Reason      string `json:"reason"`
 }
@@ -139,21 +139,21 @@ type PaymentExpiredClientPayload struct {
 // OrderProcessingClientPayload is sent to clients
 type OrderProcessingClientPayload struct {
 	OrderID     string `json:"orderId"`
-	OrderItemID int    `json:"orderItemId"`
+	OrderItemID string `json:"orderItemId"`
 	Timestamp   string `json:"timestamp"`
 }
 
 // OrderDeliveredClientPayload is sent to clients
 type OrderDeliveredClientPayload struct {
 	OrderID     string `json:"orderId"`
-	OrderItemID int    `json:"orderItemId"`
+	OrderItemID string `json:"orderItemId"`
 	Timestamp   string `json:"timestamp"`
 }
 
 // OrderFailedClientPayload is sent to clients
 type OrderFailedClientPayload struct {
 	OrderID     string `json:"orderId"`
-	OrderItemID int    `json:"orderItemId"`
+	OrderItemID string `json:"orderItemId"`
 	Reason      string `json:"reason"`
 	Timestamp   string `json:"timestamp"`
 }
