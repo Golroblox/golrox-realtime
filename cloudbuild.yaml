@@ -30,6 +30,8 @@ steps:
       - '--concurrency=100'
       - '--set-secrets=/secrets/.env=${_ENV_SECRET_NAME}:latest'
       - '--session-affinity'
+      - '--vpc-connector=projects/${PROJECT_ID}/locations/${_REGION}/connectors/redis-connector'
+      - '--vpc-egress=private-ranges-only'
     id: 'Deploy'
 
 substitutions:
