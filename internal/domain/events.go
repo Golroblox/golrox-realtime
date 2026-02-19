@@ -13,6 +13,8 @@ const (
 	EventTypeOrderDelivered   = "order.delivered"
 	EventTypeOrderFailed      = "order.failed"
 	EventTypeNotificationNew  = "notification.new"
+	EventTypeChatInbound      = "chat.inbound"
+	EventTypeChatOutbound     = "chat.outbound"
 )
 
 // ==========================================
@@ -20,14 +22,17 @@ const (
 // ==========================================
 
 const (
-	SocketEventPaymentSuccess   = "payment:success"
-	SocketEventPaymentExpired   = "payment:expired"
-	SocketEventOrderProcessing  = "order:processing"
-	SocketEventOrderDelivered   = "order:delivered"
-	SocketEventOrderFailed      = "order:failed"
-	SocketEventNotificationNew  = "notification:new"
-	SocketEventSubscribedOrder  = "subscribed:order"
-	SocketEventPong             = "pong"
+	SocketEventPaymentSuccess  = "payment:success"
+	SocketEventPaymentExpired  = "payment:expired"
+	SocketEventOrderProcessing = "order:processing"
+	SocketEventOrderDelivered  = "order:delivered"
+	SocketEventOrderFailed     = "order:failed"
+	SocketEventNotificationNew = "notification:new"
+	SocketEventSubscribedOrder = "subscribed:order"
+	SocketEventPong            = "pong"
+	SocketEventChatResponse    = "chat:response"
+	SocketEventChatTyping      = "chat:typing"
+	SocketEventChatError       = "chat:error"
 )
 
 // ==========================================
@@ -38,6 +43,7 @@ const (
 	ClientEventSubscribeOrder   = "subscribe:order"
 	ClientEventUnsubscribeOrder = "unsubscribe:order"
 	ClientEventPing             = "ping"
+	ClientEventChatSend         = "chat:send"
 )
 
 // ==========================================
@@ -102,13 +108,64 @@ type NotificationNewPayload struct {
 }
 
 // ==========================================
+// Chat Event Payloads
+// ==========================================
+
+// ChatSendPayload represents the client's chat:send message data
+type ChatSendPayload struct {
+	Message string `json:"message"`
+}
+
+// ChatInboundPayload is published to RabbitMQ for the chatbot worker
+type ChatInboundPayload struct {
+	UserID  string `json:"userId"`
+	Message string `json:"message"`
+}
+
+// ChatOutboundPayload is received from RabbitMQ with the chatbot response
+type ChatOutboundPayload struct {
+	UserID         string          `json:"userId"`
+	Response       string          `json:"response"`
+	Intent         string          `json:"intent"`
+	Confidence     float64         `json:"confidence"`
+	RichData       json.RawMessage `json:"richData,omitempty"`
+	Suggestions    []string        `json:"suggestions,omitempty"`
+	ResponseTimeMs int64           `json:"responseTimeMs"`
+}
+
+// ChatResponseClientPayload is sent to clients via WebSocket
+type ChatResponseClientPayload struct {
+	Response       string          `json:"response"`
+	Intent         string          `json:"intent"`
+	Confidence     float64         `json:"confidence"`
+	RichData       json.RawMessage `json:"richData,omitempty"`
+	Suggestions    []string        `json:"suggestions,omitempty"`
+	ResponseTimeMs int64           `json:"responseTimeMs"`
+	Timestamp      string          `json:"timestamp"`
+	CorrelationID  string          `json:"correlationId"`
+}
+
+// ChatTypingClientPayload signals typing indicator to client
+type ChatTypingClientPayload struct {
+	Timestamp int64 `json:"timestamp"`
+}
+
+// ChatErrorClientPayload sends error info to client
+type ChatErrorClientPayload struct {
+	Message string `json:"message"`
+	Code    string `json:"code"`
+}
+
+// ==========================================
 // Client Message Structures
 // ==========================================
 
-// ClientMessage represents a message from WebSocket client
+// ClientMessage represents a message from WebSocket client.
+// Data is json.RawMessage to support both string values (e.g. orderId for subscribe:order)
+// and object values (e.g. {message: string} for chat:send).
 type ClientMessage struct {
-	Event string `json:"event"`
-	Data  string `json:"data,omitempty"`
+	Event string          `json:"event"`
+	Data  json.RawMessage `json:"data,omitempty"`
 }
 
 // ServerMessage represents a message to WebSocket client
@@ -180,4 +237,22 @@ type SubscribedOrderPayload struct {
 // PongPayload for ping response
 type PongPayload struct {
 	Timestamp int64 `json:"timestamp"`
+}
+
+// ==========================================
+// Helpers
+// ==========================================
+
+// UnmarshalDataAsString extracts a plain string from json.RawMessage.
+// Handles both quoted ("value") and unquoted (value) formats for backward compatibility.
+func UnmarshalDataAsString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		// Fallback: treat raw bytes as plain string
+		return string(raw)
+	}
+	return s
 }

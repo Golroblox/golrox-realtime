@@ -11,7 +11,7 @@ import (
 
 // JWTClaims represents the JWT payload structure
 type JWTClaims struct {
-	ID    string `json:"id"`
+	ID    string `json:"userId"`
 	Email string `json:"email"`
 	jwt.RegisteredClaims
 }
@@ -79,6 +79,11 @@ func (a *Authenticator) Authenticate(token string) (*AuthResult, error) {
 
 	if !parsedToken.Valid {
 		return nil, errors.New("authentication failed: token invalid")
+	}
+
+	if claims.ID == "" {
+		a.logger.Warnw("JWT token missing user ID claim")
+		return nil, errors.New("authentication failed: missing user id")
 	}
 
 	// Token is valid, return authenticated user
