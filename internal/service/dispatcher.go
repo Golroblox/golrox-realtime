@@ -305,11 +305,20 @@ func (d *EventDispatcher) handleChatOutbound(rawPayload json.RawMessage, timesta
 
 	// Send to the user's room (auto-joined on authenticated connect)
 	userRoom := "user:" + payload.UserID
-	d.hub.BroadcastToRoom(userRoom, message)
+	roomSize := d.hub.GetRoomSize(userRoom)
+
+	if err := d.hub.BroadcastToRoom(userRoom, message); err != nil {
+		d.logger.Errorw("Failed to broadcast chat.outbound",
+			"userId", payload.UserID,
+			"room", userRoom,
+			"error", err.Error(),
+		)
+	}
 
 	d.logger.Infow("Dispatched chat.outbound",
 		"userId", payload.UserID,
 		"intent", payload.Intent,
+		"userRoomSize", roomSize,
 		"correlationId", correlationID,
 	)
 

@@ -56,7 +56,9 @@ func (c *RabbitMQConsumer) Connect(ctx context.Context) error {
 	)
 
 	var err error
-	c.conn, err = amqp.Dial(c.cfg.RabbitMQURL)
+	c.conn, err = amqp.DialConfig(c.cfg.RabbitMQURL, amqp.Config{
+		Heartbeat: 10 * time.Second,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}

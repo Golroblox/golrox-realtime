@@ -136,6 +136,12 @@ func main() {
 	<-ctx.Done()
 	appLogger.Info("Received shutdown signal, starting graceful shutdown...")
 
+	// Disconnect RabbitMQ FIRST to deregister consumers immediately.
+	// This prevents ghost consumers when air hot-reloads the process.
+	consumer.Disconnect()
+	publisher.Disconnect()
+	appLogger.Info("RabbitMQ connections closed")
+
 	// Shutdown hub (closes all WebSocket connections)
 	hub.Shutdown()
 

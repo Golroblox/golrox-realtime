@@ -180,32 +180,28 @@ func (h *WebSocketHandler) writePump(client *domain.Client) {
 				return
 			}
 
-			w, err := client.Conn.NextWriter(websocket.TextMessage)
-			if err != nil {
+			// Send each message as its own WebSocket frame to avoid
+			// batching multiple JSON objects which breaks JSON.parse on the client
+			if err := client.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
-			w.Write(message)
 
-			// Drain queued messages safely using select
+			// Drain remaining queued messages — each as its own frame
 			draining := true
 			for draining {
 				select {
 				case msg, ok := <-client.Send:
 					if !ok {
-						// Channel closed, stop draining
-						draining = false
-					} else {
-						w.Write([]byte{'\n'})
-						w.Write(msg)
+						client.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+						return
+					}
+					client.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+					if err := client.Conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+						return
 					}
 				default:
-					// No more messages, stop draining
 					draining = false
 				}
-			}
-
-			if err := w.Close(); err != nil {
-				return
 			}
 
 		case <-ticker.C:

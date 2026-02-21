@@ -48,7 +48,9 @@ func (p *RabbitMQPublisher) Connect(ctx context.Context) error {
 	p.logger.Info("Connecting RabbitMQ publisher...")
 
 	var err error
-	p.conn, err = amqp.Dial(p.cfg.RabbitMQURL)
+	p.conn, err = amqp.DialConfig(p.cfg.RabbitMQURL, amqp.Config{
+		Heartbeat: 10 * time.Second,
+	})
 	if err != nil {
 		return fmt.Errorf("publisher: failed to connect to RabbitMQ: %w", err)
 	}
