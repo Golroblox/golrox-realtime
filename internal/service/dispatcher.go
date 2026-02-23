@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/golroblox/golrox-realtime/internal/domain"
 	"github.com/golroblox/golrox-realtime/internal/pkg/logger"
@@ -44,6 +45,8 @@ func (d *EventDispatcher) Dispatch(eventType string, rawPayload json.RawMessage,
 		return d.handleNotificationNew(rawPayload, timestamp, correlationID)
 	case domain.EventTypeChatOutbound:
 		return d.handleChatOutbound(rawPayload, timestamp, correlationID)
+	case domain.EventTypeChatTyping:
+		return d.handleChatTyping(rawPayload, timestamp, correlationID)
 	default:
 		d.logger.Warnw("Unknown event type received",
 			"type", eventType,
@@ -319,6 +322,33 @@ func (d *EventDispatcher) handleChatOutbound(rawPayload json.RawMessage, timesta
 		"userId", payload.UserID,
 		"intent", payload.Intent,
 		"userRoomSize", roomSize,
+		"correlationId", correlationID,
+	)
+
+	return nil
+}
+
+func (d *EventDispatcher) handleChatTyping(rawPayload json.RawMessage, timestamp, correlationID string) error {
+	var payload domain.ChatTypingPayload
+	if err := json.Unmarshal(rawPayload, &payload); err != nil {
+		return fmt.Errorf("failed to unmarshal chat.typing payload: %w", err)
+	}
+
+	clientPayload := domain.ChatTypingClientPayload{
+		IsTyping:  payload.IsTyping,
+		Timestamp: time.Now().UnixMilli(),
+	}
+
+	message := &domain.ServerMessage{
+		Event: domain.SocketEventChatTyping,
+		Data:  clientPayload,
+	}
+
+	userRoom := "user:" + payload.UserID
+	d.hub.BroadcastToRoom(userRoom, message)
+
+	d.logger.Infow("Dispatched chat.typing",
+		"userId", payload.UserID,
 		"correlationId", correlationID,
 	)
 

@@ -15,6 +15,7 @@ const (
 	EventTypeNotificationNew  = "notification.new"
 	EventTypeChatInbound      = "chat.inbound"
 	EventTypeChatOutbound     = "chat.outbound"
+	EventTypeChatTyping       = "chat.typing"
 )
 
 // ==========================================
@@ -111,6 +112,12 @@ type NotificationNewPayload struct {
 // Chat Event Payloads
 // ==========================================
 
+// ChatTypingPayload is received from RabbitMQ when a Chatwoot agent starts/stops typing
+type ChatTypingPayload struct {
+	UserID   string `json:"userId"`
+	IsTyping bool   `json:"isTyping"`
+}
+
 // ChatSendPayload represents the client's chat:send message data
 type ChatSendPayload struct {
 	Message string `json:"message"`
@@ -147,6 +154,7 @@ type ChatResponseClientPayload struct {
 
 // ChatTypingClientPayload signals typing indicator to client
 type ChatTypingClientPayload struct {
+	IsTyping  bool  `json:"isTyping"`
 	Timestamp int64 `json:"timestamp"`
 }
 

@@ -36,7 +36,7 @@ func (c *Config) GetExchanges() map[string][]string {
 		c.RabbitMQExchangeOrders:        {"order.*"},
 		c.RabbitMQExchangePayments:      {"payment.*"},
 		c.RabbitMQExchangeNotifications: {"notification.*"},
-		c.RabbitMQExchangeChat:          {"chat.outbound"},
+		c.RabbitMQExchangeChat:          {"chat.outbound", "chat.typing"},
 	}
 }
 

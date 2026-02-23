@@ -335,15 +335,6 @@ func (h *WebSocketHandler) handleChatSend(wsClient *domain.Client, rawData json.
 
 	correlationID := uuid.New().String()
 
-	// Send typing indicator immediately
-	typingMsg := &domain.ServerMessage{
-		Event: domain.SocketEventChatTyping,
-		Data: domain.ChatTypingClientPayload{
-			Timestamp: time.Now().UnixMilli(),
-		},
-	}
-	h.hub.SendToClient(wsClient.ID, typingMsg)
-
 	// Build RabbitMQ inbound event
 	inboundPayload, _ := json.Marshal(domain.ChatInboundPayload{
 		UserID:  userID,
