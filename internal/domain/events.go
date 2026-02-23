@@ -112,6 +112,16 @@ type NotificationNewPayload struct {
 // Chat Event Payloads
 // ==========================================
 
+// MessageAttachment represents a chat attachment (image, video, file)
+type MessageAttachment struct {
+	URL      string `json:"url"`
+	ThumbURL string `json:"thumbUrl,omitempty"`
+	FileType string `json:"fileType"`
+	FileName string `json:"fileName,omitempty"`
+	FileSize int64  `json:"fileSize,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+}
+
 // ChatTypingPayload is received from RabbitMQ when a Chatwoot agent starts/stops typing
 type ChatTypingPayload struct {
 	UserID   string `json:"userId"`
@@ -120,36 +130,40 @@ type ChatTypingPayload struct {
 
 // ChatSendPayload represents the client's chat:send message data
 type ChatSendPayload struct {
-	Message string `json:"message"`
+	Message        string   `json:"message"`
+	AttachmentURLs []string `json:"attachmentUrls,omitempty"`
 }
 
 // ChatInboundPayload is published to RabbitMQ for the chatbot worker
 type ChatInboundPayload struct {
-	UserID  string `json:"userId"`
-	Message string `json:"message"`
+	UserID         string   `json:"userId"`
+	Message        string   `json:"message"`
+	AttachmentURLs []string `json:"attachmentUrls,omitempty"`
 }
 
 // ChatOutboundPayload is received from RabbitMQ with the chatbot response
 type ChatOutboundPayload struct {
-	UserID         string          `json:"userId"`
-	Response       string          `json:"response"`
-	Intent         string          `json:"intent"`
-	Confidence     float64         `json:"confidence"`
-	RichData       json.RawMessage `json:"richData,omitempty"`
-	Suggestions    []string        `json:"suggestions,omitempty"`
-	ResponseTimeMs int64           `json:"responseTimeMs"`
+	UserID         string              `json:"userId"`
+	Response       string              `json:"response"`
+	Intent         string              `json:"intent"`
+	Confidence     float64             `json:"confidence"`
+	RichData       json.RawMessage     `json:"richData,omitempty"`
+	Suggestions    []string            `json:"suggestions,omitempty"`
+	ResponseTimeMs int64               `json:"responseTimeMs"`
+	Attachments    []MessageAttachment `json:"attachments,omitempty"`
 }
 
 // ChatResponseClientPayload is sent to clients via WebSocket
 type ChatResponseClientPayload struct {
-	Response       string          `json:"response"`
-	Intent         string          `json:"intent"`
-	Confidence     float64         `json:"confidence"`
-	RichData       json.RawMessage `json:"richData,omitempty"`
-	Suggestions    []string        `json:"suggestions,omitempty"`
-	ResponseTimeMs int64           `json:"responseTimeMs"`
-	Timestamp      string          `json:"timestamp"`
-	CorrelationID  string          `json:"correlationId"`
+	Response       string              `json:"response"`
+	Intent         string              `json:"intent"`
+	Confidence     float64             `json:"confidence"`
+	RichData       json.RawMessage     `json:"richData,omitempty"`
+	Suggestions    []string            `json:"suggestions,omitempty"`
+	Attachments    []MessageAttachment `json:"attachments,omitempty"`
+	ResponseTimeMs int64               `json:"responseTimeMs"`
+	Timestamp      string              `json:"timestamp"`
+	CorrelationID  string              `json:"correlationId"`
 }
 
 // ChatTypingClientPayload signals typing indicator to client

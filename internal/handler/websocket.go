@@ -29,8 +29,8 @@ const (
 	// Send pings to peer with this period (must be less than pongWait)
 	pingPeriod = 25 * time.Second
 
-	// Maximum message size allowed from peer (increased for chat messages)
-	maxMessageSize = 1024
+	// Maximum message size allowed from peer (increased for chat messages + attachment URLs)
+	maxMessageSize = 4096
 )
 
 // WebSocketHandler handles WebSocket connections
@@ -326,9 +326,14 @@ func (h *WebSocketHandler) handleChatSend(wsClient *domain.Client, rawData json.
 		return
 	}
 
-	// Validate message
+	// Validate message — allow empty message if attachments are present
 	message := strings.TrimSpace(payload.Message)
-	if message == "" || len(message) > 500 {
+	hasAttachments := len(payload.AttachmentURLs) > 0
+	if message == "" && !hasAttachments {
+		h.sendChatError(wsClient, "Message or attachment required", "INVALID_MESSAGE")
+		return
+	}
+	if len(message) > 500 {
 		h.sendChatError(wsClient, "Message must be 1-500 characters", "INVALID_MESSAGE")
 		return
 	}
@@ -337,8 +342,9 @@ func (h *WebSocketHandler) handleChatSend(wsClient *domain.Client, rawData json.
 
 	// Build RabbitMQ inbound event
 	inboundPayload, _ := json.Marshal(domain.ChatInboundPayload{
-		UserID:  userID,
-		Message: message,
+		UserID:         userID,
+		Message:        message,
+		AttachmentURLs: payload.AttachmentURLs,
 	})
 
 	event := domain.RabbitMQEvent{

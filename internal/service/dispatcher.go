@@ -296,6 +296,7 @@ func (d *EventDispatcher) handleChatOutbound(rawPayload json.RawMessage, timesta
 		Confidence:     payload.Confidence,
 		RichData:       payload.RichData,
 		Suggestions:    payload.Suggestions,
+		Attachments:    payload.Attachments,
 		ResponseTimeMs: payload.ResponseTimeMs,
 		Timestamp:      timestamp,
 		CorrelationID:  correlationID,
