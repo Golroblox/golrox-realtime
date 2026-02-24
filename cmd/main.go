@@ -63,11 +63,18 @@ func main() {
 	}
 	defer consumer.Disconnect()
 
+	// Create and connect RabbitMQ publisher (separate connection for chat)
+	publisher := client.NewRabbitMQPublisher(&cfg, appLogger)
+	if err := publisher.Connect(ctx); err != nil {
+		appLogger.Fatalf("Failed to connect RabbitMQ publisher: %v", err)
+	}
+	defer publisher.Disconnect()
+
 	// Create authenticator
 	authenticator := middleware.NewAuthenticator(&cfg, appLogger)
 
 	// Create handlers
-	wsHandler := handler.NewWebSocketHandler(hub, authenticator, &cfg, appLogger)
+	wsHandler := handler.NewWebSocketHandler(hub, authenticator, publisher, &cfg, appLogger)
 	healthHandler := handler.NewHealthHandler(hub, consumer)
 
 	// Setup Gin router
@@ -128,6 +135,12 @@ func main() {
 	// Wait for shutdown signal
 	<-ctx.Done()
 	appLogger.Info("Received shutdown signal, starting graceful shutdown...")
+
+	// Disconnect RabbitMQ FIRST to deregister consumers immediately.
+	// This prevents ghost consumers when air hot-reloads the process.
+	consumer.Disconnect()
+	publisher.Disconnect()
+	appLogger.Info("RabbitMQ connections closed")
 
 	// Shutdown hub (closes all WebSocket connections)
 	hub.Shutdown()

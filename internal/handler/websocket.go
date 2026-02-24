@@ -1,14 +1,17 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"github.com/golroblox/golrox-realtime/internal/client"
 	"github.com/golroblox/golrox-realtime/internal/config"
 	"github.com/golroblox/golrox-realtime/internal/domain"
 	"github.com/golroblox/golrox-realtime/internal/middleware"
@@ -26,14 +29,16 @@ const (
 	// Send pings to peer with this period (must be less than pongWait)
 	pingPeriod = 25 * time.Second
 
-	// Maximum message size allowed from peer
-	maxMessageSize = 512
+	// Maximum message size allowed from peer (increased for chat messages + attachment URLs)
+	maxMessageSize = 4096
 )
 
 // WebSocketHandler handles WebSocket connections
 type WebSocketHandler struct {
 	hub           *service.Hub
 	authenticator *middleware.Authenticator
+	publisher     *client.RabbitMQPublisher
+	cfg           *config.Config
 	logger        *logger.Logger
 	upgrader      websocket.Upgrader
 }
@@ -42,12 +47,15 @@ type WebSocketHandler struct {
 func NewWebSocketHandler(
 	hub *service.Hub,
 	auth *middleware.Authenticator,
+	publisher *client.RabbitMQPublisher,
 	cfg *config.Config,
 	logger *logger.Logger,
 ) *WebSocketHandler {
 	return &WebSocketHandler{
 		hub:           hub,
 		authenticator: auth,
+		publisher:     publisher,
+		cfg:           cfg,
 		logger:        logger,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
@@ -172,32 +180,28 @@ func (h *WebSocketHandler) writePump(client *domain.Client) {
 				return
 			}
 
-			w, err := client.Conn.NextWriter(websocket.TextMessage)
-			if err != nil {
+			// Send each message as its own WebSocket frame to avoid
+			// batching multiple JSON objects which breaks JSON.parse on the client
+			if err := client.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
-			w.Write(message)
 
-			// Drain queued messages safely using select
+			// Drain remaining queued messages — each as its own frame
 			draining := true
 			for draining {
 				select {
 				case msg, ok := <-client.Send:
 					if !ok {
-						// Channel closed, stop draining
-						draining = false
-					} else {
-						w.Write([]byte{'\n'})
-						w.Write(msg)
+						client.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+						return
+					}
+					client.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+					if err := client.Conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+						return
 					}
 				default:
-					// No more messages, stop draining
 					draining = false
 				}
-			}
-
-			if err := w.Close(); err != nil {
-				return
 			}
 
 		case <-ticker.C:
@@ -231,6 +235,9 @@ func (h *WebSocketHandler) handleClientMessage(client *domain.Client, message []
 	case domain.ClientEventPing:
 		h.handlePing(client)
 
+	case domain.ClientEventChatSend:
+		h.handleChatSend(client, msg.Data)
+
 	default:
 		h.logger.Warnw("Unknown client event",
 			"clientId", client.ID,
@@ -239,7 +246,8 @@ func (h *WebSocketHandler) handleClientMessage(client *domain.Client, message []
 	}
 }
 
-func (h *WebSocketHandler) handleSubscribeOrder(client *domain.Client, orderID string) {
+func (h *WebSocketHandler) handleSubscribeOrder(client *domain.Client, rawData json.RawMessage) {
+	orderID := domain.UnmarshalDataAsString(rawData)
 	if orderID == "" {
 		h.logger.Warnw("Invalid orderId for subscription",
 			"clientId", client.ID,
@@ -272,7 +280,8 @@ func (h *WebSocketHandler) handleSubscribeOrder(client *domain.Client, orderID s
 	}
 }
 
-func (h *WebSocketHandler) handleUnsubscribeOrder(client *domain.Client, orderID string) {
+func (h *WebSocketHandler) handleUnsubscribeOrder(client *domain.Client, rawData json.RawMessage) {
+	orderID := domain.UnmarshalDataAsString(rawData)
 	if orderID == "" {
 		return
 	}
@@ -299,4 +308,82 @@ func (h *WebSocketHandler) handlePing(client *domain.Client) {
 			"error", err.Error(),
 		)
 	}
+}
+
+// handleChatSend processes chat:send events from authenticated clients
+func (h *WebSocketHandler) handleChatSend(wsClient *domain.Client, rawData json.RawMessage) {
+	// Require authenticated user
+	if wsClient.UserID == nil {
+		h.sendChatError(wsClient, "Authentication required", "AUTH_REQUIRED")
+		return
+	}
+	userID := *wsClient.UserID
+
+	// Parse chat message payload
+	var payload domain.ChatSendPayload
+	if err := json.Unmarshal(rawData, &payload); err != nil {
+		h.sendChatError(wsClient, "Invalid message format", "INVALID_FORMAT")
+		return
+	}
+
+	// Validate message — allow empty message if attachments are present
+	message := strings.TrimSpace(payload.Message)
+	hasAttachments := len(payload.AttachmentURLs) > 0
+	if message == "" && !hasAttachments {
+		h.sendChatError(wsClient, "Message or attachment required", "INVALID_MESSAGE")
+		return
+	}
+	if len(message) > 500 {
+		h.sendChatError(wsClient, "Message must be 1-500 characters", "INVALID_MESSAGE")
+		return
+	}
+
+	correlationID := uuid.New().String()
+
+	// Build RabbitMQ inbound event
+	inboundPayload, _ := json.Marshal(domain.ChatInboundPayload{
+		UserID:         userID,
+		Message:        message,
+		AttachmentURLs: payload.AttachmentURLs,
+	})
+
+	event := domain.RabbitMQEvent{
+		Type:          domain.EventTypeChatInbound,
+		Payload:       inboundPayload,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		CorrelationID: correlationID,
+	}
+
+	body, _ := json.Marshal(event)
+
+	// Publish to RabbitMQ
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := h.publisher.Publish(ctx, h.cfg.RabbitMQExchangeChat, "chat.inbound", body); err != nil {
+		h.logger.Errorw("Failed to publish chat message",
+			"userId", userID,
+			"correlationId", correlationID,
+			"error", err.Error(),
+		)
+		h.sendChatError(wsClient, "Failed to send message. Please try again.", "PUBLISH_FAILED")
+		return
+	}
+
+	h.logger.Infow("Chat message published",
+		"userId", userID,
+		"correlationId", correlationID,
+	)
+}
+
+// sendChatError sends a chat:error event to the client
+func (h *WebSocketHandler) sendChatError(wsClient *domain.Client, message, code string) {
+	errMsg := &domain.ServerMessage{
+		Event: domain.SocketEventChatError,
+		Data: domain.ChatErrorClientPayload{
+			Message: message,
+			Code:    code,
+		},
+	}
+	h.hub.SendToClient(wsClient.ID, errMsg)
 }

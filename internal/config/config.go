@@ -21,6 +21,7 @@ type Config struct {
 	RabbitMQExchangeOrders        string `env:"RABBITMQ_EXCHANGE_ORDERS" envDefault:"golrox.events.orders"`
 	RabbitMQExchangePayments      string `env:"RABBITMQ_EXCHANGE_PAYMENTS" envDefault:"golrox.events.payments"`
 	RabbitMQExchangeNotifications string `env:"RABBITMQ_EXCHANGE_NOTIFICATIONS" envDefault:"golrox.events.notifications"`
+	RabbitMQExchangeChat          string `env:"RABBITMQ_EXCHANGE_CHAT" envDefault:"golrox.events.chat"`
 
 	// JWT (optional - if empty, only anonymous connections allowed)
 	JWTSecret string `env:"JWT_SECRET"`
@@ -35,6 +36,7 @@ func (c *Config) GetExchanges() map[string][]string {
 		c.RabbitMQExchangeOrders:        {"order.*"},
 		c.RabbitMQExchangePayments:      {"payment.*"},
 		c.RabbitMQExchangeNotifications: {"notification.*"},
+		c.RabbitMQExchangeChat:          {"chat.outbound", "chat.typing"},
 	}
 }
 

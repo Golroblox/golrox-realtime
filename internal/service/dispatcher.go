@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/golroblox/golrox-realtime/internal/domain"
 	"github.com/golroblox/golrox-realtime/internal/pkg/logger"
@@ -42,6 +43,10 @@ func (d *EventDispatcher) Dispatch(eventType string, rawPayload json.RawMessage,
 		return d.handleOrderFailed(rawPayload, timestamp, correlationID)
 	case domain.EventTypeNotificationNew:
 		return d.handleNotificationNew(rawPayload, timestamp, correlationID)
+	case domain.EventTypeChatOutbound:
+		return d.handleChatOutbound(rawPayload, timestamp, correlationID)
+	case domain.EventTypeChatTyping:
+		return d.handleChatTyping(rawPayload, timestamp, correlationID)
 	default:
 		d.logger.Warnw("Unknown event type received",
 			"type", eventType,
@@ -273,6 +278,78 @@ func (d *EventDispatcher) handleNotificationNew(rawPayload json.RawMessage, time
 	d.logger.Infow("Dispatched notification.new",
 		"userId", payload.UserID,
 		"notificationId", payload.NotificationID,
+		"correlationId", correlationID,
+	)
+
+	return nil
+}
+
+func (d *EventDispatcher) handleChatOutbound(rawPayload json.RawMessage, timestamp, correlationID string) error {
+	var payload domain.ChatOutboundPayload
+	if err := json.Unmarshal(rawPayload, &payload); err != nil {
+		return fmt.Errorf("failed to unmarshal chat.outbound payload: %w", err)
+	}
+
+	clientPayload := domain.ChatResponseClientPayload{
+		Response:       payload.Response,
+		Intent:         payload.Intent,
+		Confidence:     payload.Confidence,
+		RichData:       payload.RichData,
+		Suggestions:    payload.Suggestions,
+		Attachments:    payload.Attachments,
+		ResponseTimeMs: payload.ResponseTimeMs,
+		Timestamp:      timestamp,
+		CorrelationID:  correlationID,
+	}
+
+	message := &domain.ServerMessage{
+		Event: domain.SocketEventChatResponse,
+		Data:  clientPayload,
+	}
+
+	// Send to the user's room (auto-joined on authenticated connect)
+	userRoom := "user:" + payload.UserID
+	roomSize := d.hub.GetRoomSize(userRoom)
+
+	if err := d.hub.BroadcastToRoom(userRoom, message); err != nil {
+		d.logger.Errorw("Failed to broadcast chat.outbound",
+			"userId", payload.UserID,
+			"room", userRoom,
+			"error", err.Error(),
+		)
+	}
+
+	d.logger.Infow("Dispatched chat.outbound",
+		"userId", payload.UserID,
+		"intent", payload.Intent,
+		"userRoomSize", roomSize,
+		"correlationId", correlationID,
+	)
+
+	return nil
+}
+
+func (d *EventDispatcher) handleChatTyping(rawPayload json.RawMessage, timestamp, correlationID string) error {
+	var payload domain.ChatTypingPayload
+	if err := json.Unmarshal(rawPayload, &payload); err != nil {
+		return fmt.Errorf("failed to unmarshal chat.typing payload: %w", err)
+	}
+
+	clientPayload := domain.ChatTypingClientPayload{
+		IsTyping:  payload.IsTyping,
+		Timestamp: time.Now().UnixMilli(),
+	}
+
+	message := &domain.ServerMessage{
+		Event: domain.SocketEventChatTyping,
+		Data:  clientPayload,
+	}
+
+	userRoom := "user:" + payload.UserID
+	d.hub.BroadcastToRoom(userRoom, message)
+
+	d.logger.Infow("Dispatched chat.typing",
+		"userId", payload.UserID,
 		"correlationId", correlationID,
 	)
 
