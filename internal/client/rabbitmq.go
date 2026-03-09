@@ -17,23 +17,25 @@ import (
 )
 
 const (
-	maxReconnectAttempts = 10
+	maxReconnectAttempts = 0 // 0 = unlimited reconnect attempts
 	reconnectDelay       = 5 * time.Second
+	maxReconnectDelay    = 60 * time.Second
 	prefetchCount        = 10
 )
 
 // RabbitMQConsumer consumes events from RabbitMQ and dispatches to WebSocket clients
 type RabbitMQConsumer struct {
-	conn              *amqp.Connection
-	channel           *amqp.Channel
-	cfg               *config.Config
-	logger            *logger.Logger
-	dispatcher        *service.EventDispatcher
-	mu                sync.Mutex
+	conn       *amqp.Connection
+	channel    *amqp.Channel
+	cfg        *config.Config
+	logger     *logger.Logger
+	dispatcher *service.EventDispatcher
+	mu         sync.Mutex
 	isConnected       bool
 	reconnectAttempts int
 	closed            bool
 	done              chan struct{}
+	ctx               context.Context
 }
 
 // NewRabbitMQConsumer creates a new RabbitMQ consumer
@@ -50,6 +52,9 @@ func NewRabbitMQConsumer(cfg *config.Config, logger *logger.Logger, dispatcher *
 func (c *RabbitMQConsumer) Connect(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	// Store context for reconnection
+	c.ctx = ctx
 
 	c.logger.Infow("Connecting to RabbitMQ...",
 		"url", c.maskURL(c.cfg.RabbitMQURL),
@@ -166,27 +171,63 @@ func (c *RabbitMQConsumer) Connect(ctx context.Context) error {
 		"prefetch", prefetchCount,
 	)
 
-	// Handle connection errors in goroutine
-	go c.handleConnectionErrors()
-
-	// Process messages in goroutine
-	go c.processMessages(ctx, msgs)
+	// Monitor both connection AND channel close in one goroutine
+	go c.monitorConnection(ctx, msgs)
 
 	return nil
 }
 
-func (c *RabbitMQConsumer) processMessages(ctx context.Context, msgs <-chan amqp.Delivery) {
+// monitorConnection watches for connection/channel drops and triggers reconnection
+func (c *RabbitMQConsumer) monitorConnection(ctx context.Context, msgs <-chan amqp.Delivery) {
+	connClose := c.conn.NotifyClose(make(chan *amqp.Error, 1))
+	chanClose := c.channel.NotifyClose(make(chan *amqp.Error, 1))
+
 	for {
 		select {
-		case <-ctx.Done():
-			c.logger.Info("Context cancelled, stopping message processing")
-			return
 		case <-c.done:
-			c.logger.Info("Consumer done, stopping message processing")
+			return
+		case <-ctx.Done():
+			c.logger.Info("Context cancelled, stopping consumer")
+			return
+		case err := <-connClose:
+			if err != nil {
+				c.logger.Errorw("RabbitMQ connection closed unexpectedly",
+					"error", err.Error(),
+					"code", err.Code,
+					"reason", err.Reason,
+				)
+			} else {
+				c.logger.Warn("RabbitMQ connection closed (nil error)")
+			}
+			c.mu.Lock()
+			c.isConnected = false
+			c.mu.Unlock()
+			c.attemptReconnect()
+			return
+		case err := <-chanClose:
+			if err != nil {
+				c.logger.Errorw("RabbitMQ channel closed unexpectedly",
+					"error", err.Error(),
+					"code", err.Code,
+					"reason", err.Reason,
+				)
+			} else {
+				c.logger.Warn("RabbitMQ channel closed (nil error)")
+			}
+			c.mu.Lock()
+			c.isConnected = false
+			c.mu.Unlock()
+			c.cleanup()
+			c.attemptReconnect()
 			return
 		case msg, ok := <-msgs:
 			if !ok {
-				c.logger.Warn("Message channel closed")
+				c.logger.Warn("Message delivery channel closed, triggering reconnect")
+				c.mu.Lock()
+				c.isConnected = false
+				c.mu.Unlock()
+				c.cleanup()
+				c.attemptReconnect()
 				return
 			}
 			c.handleMessage(msg)
@@ -246,62 +287,56 @@ func (c *RabbitMQConsumer) handleMessage(msg amqp.Delivery) {
 	)
 }
 
-func (c *RabbitMQConsumer) handleConnectionErrors() {
-	notifyClose := c.conn.NotifyClose(make(chan *amqp.Error))
-
-	for {
-		select {
-		case <-c.done:
-			return
-		case err := <-notifyClose:
-			if err == nil {
-				return // Normal close
-			}
-
-			c.logger.Warnw("RabbitMQ connection lost",
-				"error", err.Error(),
-			)
-
-			c.mu.Lock()
-			c.isConnected = false
-			c.mu.Unlock()
-
-			c.attemptReconnect()
-			return
-		}
-	}
-}
-
 func (c *RabbitMQConsumer) attemptReconnect() {
-	for i := 0; i < maxReconnectAttempts; i++ {
+	attempt := 0
+	for {
 		c.mu.Lock()
 		if c.closed {
 			c.mu.Unlock()
 			return
 		}
-		c.reconnectAttempts = i + 1
+		attempt++
+		c.reconnectAttempts = attempt
 		c.mu.Unlock()
 
+		// Exponential backoff with cap
+		delay := reconnectDelay * time.Duration(1<<uint(min(attempt-1, 4)))
+		if delay > maxReconnectDelay {
+			delay = maxReconnectDelay
+		}
+
 		c.logger.Warnw("Attempting to reconnect to RabbitMQ",
-			"attempt", i+1,
-			"maxAttempts", maxReconnectAttempts,
+			"attempt", attempt,
+			"delay", delay.String(),
 		)
 
-		time.Sleep(reconnectDelay)
+		time.Sleep(delay)
 
-		if err := c.Connect(context.Background()); err != nil {
-			c.logger.Warnw("Reconnect attempt failed",
-				"attempt", i+1,
+		c.mu.Lock()
+		if c.closed {
+			c.mu.Unlock()
+			return
+		}
+		c.mu.Unlock()
+
+		ctx := c.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		if err := c.Connect(ctx); err != nil {
+			c.logger.Errorw("Reconnect attempt failed",
+				"attempt", attempt,
 				"error", err.Error(),
 			)
 			continue
 		}
 
-		c.logger.Info("Reconnected to RabbitMQ successfully")
+		c.logger.Infow("Reconnected to RabbitMQ successfully",
+			"attempt", attempt,
+		)
 		return
 	}
-
-	c.logger.Error("Max reconnect attempts reached, giving up")
 }
 
 // Disconnect gracefully closes the RabbitMQ connection
@@ -349,4 +384,11 @@ func (c *RabbitMQConsumer) maskURL(rawURL string) string {
 		parsed.User = url.UserPassword(parsed.User.Username(), "****")
 	}
 	return parsed.String()
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
